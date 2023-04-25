@@ -10,8 +10,9 @@ from route_settings_builder import models
 class CriterionAdmin(admin.ModelAdmin):
     """ Администраторская страница для критериев """
     search_fields = ('internal_name', 'name', )
-    list_display = ('internal_name', 'name', 'value_type', )
+    list_display = ('internal_name', 'name', 'value_type', 'updated_at', 'created_at', )
     list_filter = ('value_type', )
+    ordering = ('-updated_at', )
 
 
 class PlaceCriterionInline(admin.TabularInline):
@@ -26,7 +27,9 @@ class PlaceCriterionInline(admin.TabularInline):
 class PlaceAdmin(admin.ModelAdmin):
     """ Администраторская страница для мест """
     search_fields = ('name', )
-    list_display = ('name', 'longitude', 'latitude', )
+    list_display = ('name', 'longitude', 'latitude', 'updated_at', 'created_at', )
+    ordering = ('-updated_at', )
+
     inlines = (PlaceCriterionInline, )
 
 
@@ -47,7 +50,8 @@ class GuideInline(admin.TabularInline):
 class RouteAdmin(admin.ModelAdmin):
     """ Администраторская страница для маршрутов """
     search_fields = ('name', 'author__username', )
-    list_display = ('name', 'author', )
+    list_display = ('name', 'author', 'updated_at', 'created_at', )
+    ordering = ('-updated_at', )
 
     autocomplete_fields = ('places', 'author', )
     inlines = (GuideInline, RouteCriterionInline, )
