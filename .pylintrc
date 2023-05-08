@@ -39,7 +39,7 @@ extension-pkg-whitelist=
 fail-on=
 
 # Specify a score threshold under which the program will exit with error.
-fail-under=10
+fail-under=10.0
 
 # Interpret the stdin as a python script, whose filename needs to be passed as
 # the module_or_package argument.
@@ -315,6 +315,12 @@ max-statements=50
 min-public-methods=2
 
 
+[DJANGO FOREIGN KEYS REFERENCED BY STRINGS]
+
+# A module containing Django settings to be used while linting.
+django-settings-module=route_settings_builder.settings
+
+
 [EXCEPTIONS]
 
 # Exceptions that will emit a warning when caught.
@@ -337,7 +343,7 @@ indent-after-paren=4
 indent-string='    '
 
 # Maximum number of characters on a single line.
-max-line-length=100
+max-line-length=119
 
 # Maximum number of lines in a module.
 max-module-lines=1000

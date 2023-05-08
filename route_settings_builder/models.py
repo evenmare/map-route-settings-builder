@@ -1,9 +1,11 @@
+import uuid
+
 from django.db import models
 from django.conf import settings
 
 from ckeditor import fields
 
-from route_settings_builder import validators
+from route_settings_builder import validators, querysets
 
 
 class UpdateDescriptionMixin(models.Model):
@@ -35,7 +37,7 @@ class Criterion(UpdateDescriptionMixin, models.Model):
                                   choices=[
                                       ('string', 'Строковый'),
                                       ('numeric', 'Числовой'),
-                                      ('range', 'Диапазон'),
+                                      # ('range', 'Диапазон'),
                                   ],
                                   verbose_name='Тип значения')
 
@@ -49,6 +51,10 @@ class Criterion(UpdateDescriptionMixin, models.Model):
 
 class Place(UpdateDescriptionMixin, models.Model):
     """ Место """
+    uuid = models.UUIDField(default=uuid.uuid4,
+                            editable=False,
+                            verbose_name='Идентификатор места')
+
     name = models.CharField(max_length=255,
                             null=False,
                             blank=False,
@@ -111,6 +117,10 @@ class PlaceCriterion(models.Model):
 
 class Route(UpdateDescriptionMixin, models.Model):
     """ Маршрут """
+    uuid = models.UUIDField(default=uuid.uuid4,
+                            editable=False,
+                            verbose_name='Идентификатор маршрута')
+
     name = models.CharField(max_length=255,
                             null=False,
                             blank=False,
@@ -134,6 +144,8 @@ class Route(UpdateDescriptionMixin, models.Model):
                                on_delete=models.SET_NULL,
                                related_name='routes',
                                verbose_name='Автор')
+
+    objects = querysets.RouteQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Маршрут'

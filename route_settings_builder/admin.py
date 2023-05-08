@@ -26,9 +26,10 @@ class PlaceCriterionInline(admin.TabularInline):
 @admin.register(models.Place)
 class PlaceAdmin(admin.ModelAdmin):
     """ Администраторская страница для мест """
-    search_fields = ('name', )
+    search_fields = ('uuid', 'name', )
     list_display = ('name', 'longitude', 'latitude', 'updated_at', 'created_at', )
     ordering = ('-updated_at', )
+    readonly_fields = ('uuid', )
 
     inlines = (PlaceCriterionInline, )
 
@@ -49,9 +50,10 @@ class GuideInline(admin.TabularInline):
 @admin.register(models.Route)
 class RouteAdmin(admin.ModelAdmin):
     """ Администраторская страница для маршрутов """
-    search_fields = ('name', 'author__username', )
+    search_fields = ('uuid', 'name', 'author__username', )
     list_display = ('name', 'author', 'updated_at', 'created_at', )
     ordering = ('-updated_at', )
+    readonly_fields = ('uuid', )
 
     autocomplete_fields = ('places', 'author', )
     inlines = (GuideInline, RouteCriterionInline, )
