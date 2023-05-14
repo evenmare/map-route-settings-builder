@@ -7,6 +7,7 @@ load_dotenv()
 
 include(
     '_database.py',
+    '_rabbitmq.py',
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -37,7 +38,6 @@ REQUIRED_APPS = [
     'django.contrib.staticfiles',
 
     'ckeditor',
-    'django_json_widget',
     'ninja_apikey',
 ]
 

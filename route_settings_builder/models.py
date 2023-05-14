@@ -2,10 +2,29 @@ import uuid
 
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 
 from ckeditor import fields
 
 from route_settings_builder import validators, querysets
+
+
+def validate_value(value_type: str, value: str) -> str:
+    """
+    Валидация значения критерия маршрута
+    :param value_type: тип значения
+    :param value: значение
+    :return: значение
+    """
+    error_details = {'code': 'invalid', 'params': {'value': value}}
+
+    if (value_type == 'numeric' and
+            not (value[1:] if len(value) > 1 and value[0] == '-' else value).replace('.', '', 1).isdigit()):
+        raise ValidationError('Значение должно быть числом', **error_details)
+    if value_type == 'boolean' and value not in ('0', '1', 'true', 'false'):
+        raise ValidationError('Значение должно быть логическим значением: 0, 1, true, false', **error_details)
+
+    return value
 
 
 class UpdateDescriptionMixin(models.Model):
@@ -22,12 +41,14 @@ class Criterion(UpdateDescriptionMixin, models.Model):
     name = models.CharField(max_length=255,
                             null=False,
                             blank=False,
+                            db_index=True,
                             verbose_name='Наименование')
 
     internal_name = models.CharField(max_length=63,
                                      null=False,
                                      blank=False,
                                      unique=True,
+                                     db_index=True,
                                      verbose_name='Внутреннее наименование')
 
     value_type = models.CharField(max_length=7,
@@ -37,7 +58,7 @@ class Criterion(UpdateDescriptionMixin, models.Model):
                                   choices=[
                                       ('string', 'Строковый'),
                                       ('numeric', 'Числовой'),
-                                      # ('range', 'Диапазон'),
+                                      ('boolean', 'Логический'),
                                   ],
                                   verbose_name='Тип значения')
 
@@ -51,32 +72,29 @@ class Criterion(UpdateDescriptionMixin, models.Model):
 
 class Place(UpdateDescriptionMixin, models.Model):
     """ Место """
-    uuid = models.UUIDField(default=uuid.uuid4,
-                            editable=False,
-                            verbose_name='Идентификатор места')
-
     name = models.CharField(max_length=255,
                             null=False,
                             blank=False,
+                            db_index=True,
                             verbose_name='Наименование')
 
     description = fields.RichTextField(null=True,
                                        blank=True,
                                        verbose_name='Описание')
 
-    longitude = models.DecimalField(max_digits=8,
-                                    decimal_places=5,
-                                    null=False,
-                                    blank=False,
-                                    validators=[validators.validate_longitude],
-                                    verbose_name='Долгота')
-
-    latitude = models.DecimalField(max_digits=7,
-                                   decimal_places=5,
+    latitude = models.DecimalField(max_digits=8,
+                                   decimal_places=6,
                                    null=False,
                                    blank=False,
                                    validators=[validators.validate_latitude],
                                    verbose_name='Широта')
+
+    longitude = models.DecimalField(max_digits=9,
+                                    decimal_places=6,
+                                    null=False,
+                                    blank=False,
+                                    validators=[validators.validate_longitude],
+                                    verbose_name='Долгота')
 
     criteria = models.ManyToManyField(Criterion,
                                       through='PlaceCriterion',
@@ -92,7 +110,6 @@ class Place(UpdateDescriptionMixin, models.Model):
 
 
 class PlaceCriterion(models.Model):
-    # TODO: проверку для значений (повторное использование критерия только для типа диапазон)
     """ Критерий для места """
     place = models.ForeignKey(Place,
                               on_delete=models.CASCADE,
@@ -107,7 +124,16 @@ class PlaceCriterion(models.Model):
                              blank=True,
                              verbose_name='Значение')
 
+    def clean(self):
+        super().clean()
+        validate_value(self.criterion.value_type, self.value)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     class Meta:
+        unique_together = ['place', 'criterion']
         verbose_name = 'Критерий для места'
         verbose_name_plural = 'критерии для места'
 
@@ -118,19 +144,23 @@ class PlaceCriterion(models.Model):
 class Route(UpdateDescriptionMixin, models.Model):
     """ Маршрут """
     uuid = models.UUIDField(default=uuid.uuid4,
+                            unique=True,
                             editable=False,
-                            verbose_name='Идентификатор маршрута')
+                            db_index=True,
+                            verbose_name='Идентификатор')
 
     name = models.CharField(max_length=255,
                             null=False,
                             blank=False,
+                            db_index=True,
                             verbose_name='Наименование')
 
     details = models.JSONField(null=True,
                                blank=True,
-                               verbose_name='Описание маршрута')
+                               verbose_name='Детализация маршрута')
 
     places = models.ManyToManyField(Place,
+                                    through='RoutePlace',
                                     related_name='routes',
                                     verbose_name='Места')
 
@@ -138,6 +168,15 @@ class Route(UpdateDescriptionMixin, models.Model):
                                       through='RouteCriterion',
                                       related_name='routes',
                                       verbose_name='Критерии')
+
+    guide_description = fields.RichTextField(null=True,
+                                             blank=True,
+                                             verbose_name='Описание путеводителя')
+
+    guide_image = models.ImageField(upload_to='guides/',
+                                    null=True,
+                                    blank=True,
+                                    verbose_name='Файл путеводителя')
 
     author = models.ForeignKey(settings.AUTH_USER_MODEL,
                                null=True,
@@ -156,7 +195,6 @@ class Route(UpdateDescriptionMixin, models.Model):
 
 
 class RouteCriterion(models.Model):
-    # TODO: проверку для значений (повторное использование критерия только для типа диапазон)
     """ Критерий для маршрута """
     route = models.ForeignKey(Route,
                               on_delete=models.CASCADE,
@@ -171,7 +209,16 @@ class RouteCriterion(models.Model):
                              blank=True,
                              verbose_name='Значение')
 
+    def clean(self):
+        super().clean()
+        validate_value(self.criterion.value_type, self.value)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     class Meta:
+        unique_together = ['route', 'criterion']
         verbose_name = 'Критерий для маршрута'
         verbose_name_plural = 'критерии для маршрута'
 
@@ -179,26 +226,17 @@ class RouteCriterion(models.Model):
         return self.criterion.internal_name
 
 
-class Guide(UpdateDescriptionMixin, models.Model):
-    """ Путеводитель """
-    route = models.OneToOneField(Route,
-                                 null=True,
-                                 on_delete=models.CASCADE,
-                                 related_name='guide',
-                                 verbose_name='Маршрут')
+class RoutePlace(models.Model):
+    """ Место маршрута """
+    route = models.ForeignKey(Route,
+                              on_delete=models.CASCADE,
+                              verbose_name='Маршрут')
 
-    description = fields.RichTextField(null=True,
-                                       blank=True,
-                                       verbose_name='Описание')
-
-    image = models.ImageField(upload_to='guides/',
-                              null=True,
-                              blank=True,
-                              verbose_name='Файл')
+    place = models.ForeignKey(Place,
+                              on_delete=models.PROTECT,
+                              verbose_name='Место')
 
     class Meta:
-        verbose_name = 'Путеводитель'
-        verbose_name_plural = 'путеводители'
-
-    def __str__(self) -> str:
-        return f'Путеводитель к маршруту "{self.route.name}"'
+        unique_together = ['route', 'place']
+        verbose_name = 'Место маршрута'
+        verbose_name_plural = 'места маршрута'

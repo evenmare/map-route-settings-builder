@@ -1,9 +1,12 @@
+from typing import Optional
+
 import decimal
 import pytest
 
 from django.core.exceptions import ValidationError
 
 from route_settings_builder import validators
+from route_settings_builder.models import validate_value
 
 
 @pytest.mark.parametrize('validation_func_name, correct_numbers, wrong_numbers',
@@ -24,3 +27,18 @@ def test_coordinates_validators(validation_func_name, correct_numbers, wrong_num
     for number in wrong_numbers:
         with pytest.raises(ValidationError):
             getattr(validators, validation_func_name)(number)
+
+
+@pytest.mark.parametrize('value_type, value, is_error',
+                         [('numeric', '3.0', 0), ('numeric', '3', 0), ('numeric', '-999', 0), ('numeric', '-9.5', 0),
+                          ('numeric', 'a.5', True), ('numeric', '-d', True), ('numeric', '', True),
+                          ('boolean', '1', 0), ('boolean', '0', 0), ('boolean', 'true', 0), ('boolean', 'false', 0),
+                          ('boolean', 'try', True), ('boolean', '', True), ('boolean', '2', True),
+                          ('string', 'some', 0), ('string', '2', 0), ('string', '', 0)])
+def test_validate_criterion_value(value_type: str, value: str, is_error):
+    if not is_error:
+        assert validate_value(value_type, value) == value
+        return
+
+    with pytest.raises(ValidationError):
+        validate_value(value_type, value)

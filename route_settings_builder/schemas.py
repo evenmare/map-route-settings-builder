@@ -13,14 +13,14 @@ class PlaceSchema(ModelSchema):
 
     class Config:
         model = models.Place
-        model_fields = ('uuid', 'name', 'longitude', 'latitude', )
+        model_fields = ('id', 'name', 'longitude', 'latitude', )
 
 
 class CriterionSchema(ModelSchema):
     """ Схема к сущности критерия """
     class Config:
         model = models.Criterion
-        model_fields = ('internal_name', 'name', 'value_type', )
+        model_fields = ('id', 'internal_name', 'name', 'value_type', )
 
 
 class NestedCriterionSchema(Schema):
@@ -35,7 +35,7 @@ class DetailedPlaceSchema(PlaceSchema):
 
     class Config:
         model = models.Place
-        model_fields = ('uuid', 'name', 'longitude', 'latitude', )
+        model_fields = ('id', 'name', 'longitude', 'latitude', )
 
 
 class ListRouteSchema(ModelSchema):
@@ -58,28 +58,18 @@ class DetailedRouteSchema(ListRouteSchema):
         model_fields = ('uuid', 'updated_at', 'name', 'details', 'places', )
 
 
-class WriteRouteSchema(ModelSchema):
-    """ Схема создания и редактирования для сущности маршрута """
-
-    class Config:
-        model = models.Route
-        model_fields = ('name', )
-
-
-class PlaceToRouteSchema(ModelSchema):
-    """ Схема добавления места в маршрут """
-
-    class Config:
-        model = models.Place
-        model_fields = ('uuid', )
-
-
-class CriterionToRouteSchema(Schema):
-    """ Схема добавления критерия в маршрут """
-    internal_name: str
+class NestedSaveRouteCriterionSchema(Schema):
+    criterion_id: int
     value: str
 
 
-class UpdateRouteCriterion(Schema):
-    """ Схема обновления критерия в маршруте """
-    value: str
+class UpdateRouteSchema(Schema):
+    name: Optional[str]
+    guide_description: Optional[str]
+    criteria: Optional[List[NestedSaveRouteCriterionSchema]]
+    places: Optional[List[int]]
+
+
+class CreateRouteSchema(UpdateRouteSchema):
+    name: str
+    places: List[int]

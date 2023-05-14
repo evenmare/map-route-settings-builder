@@ -1,14 +1,25 @@
 from typing import List, Optional
 import uuid
 
+from asgiref.sync import sync_to_async
+
+from django.shortcuts import render
 from ninja import NinjaAPI, Query, pagination, errors
 from ninja_apikey.security import APIKeyAuth
 
-from route_settings_builder import models, schemas, filters, queries
+from route_settings_builder import models, schemas, filters, models_utils, gateways
 
 
 auth = APIKeyAuth()  # TODO: bearer token авторизация
-api = NinjaAPI(auth=auth)
+api = NinjaAPI(csrf=True, auth=auth)
+
+
+class AsyncAPIKeyAuth(APIKeyAuth):  # pylint: disable=too-few-public-methods
+    """ Асинхронная авторизация """
+
+    @sync_to_async
+    def authenticate(self, *args, **kwargs):
+        return super().authenticate(*args, **kwargs)
 
 
 @api.get('/health', auth=None)
@@ -20,28 +31,18 @@ def health_status(request):
 @api.get('/places', response={200: List[schemas.PlaceSchema]})
 @pagination.paginate()
 def get_places(request, request_filters: filters.PlaceFilterSchema = Query(...)):
-    """
-    Получение перечня мест
-    :param request: запрос
-    :param request_filters: фильтры запроса
-    :return: перечень мест
-    """
+    """ Получение перечня мест """
     places = models.Place.objects.all()
     places = request_filters.filter(places)
     return places
 
 
-@api.get('/places/{place_uuid}', response=schemas.DetailedPlaceSchema)
-def get_place(request, place_uuid: uuid.UUID):
-    """
-    Получение места
-    :param request: запрос
-    :param place_uuid: уникальный идентификатор места
-    :return: место
-    """
+@api.get('/places/{place_id}', response=schemas.DetailedPlaceSchema)
+def get_place(request, place_id: int):
+    """ Получение места """
     try:
         # TODO: Оптимизация запросов к БД
-        place = models.Place.objects.get(uuid=place_uuid)
+        place = models.Place.objects.get(uuid=place_id)
     except models.Place.DoesNotExist as ex:
         raise errors.HttpError(404, 'Место не найдено') from ex
 
@@ -50,12 +51,7 @@ def get_place(request, place_uuid: uuid.UUID):
 
 @api.get('/criteria', response=List[schemas.CriterionSchema])
 def get_criteria(request, request_filters: filters.CriterionFilterSchema = Query(...)):
-    """
-    Получение перечня критериев
-    :param request: запрос
-    :param request_filters: фильтры запроса
-    :return: перечень критериев
-    """
+    """ Получение перечня критериев """
     criteria = models.Criterion.objects.all()
     criteria = request_filters.filter(criteria)
     return criteria
@@ -64,12 +60,7 @@ def get_criteria(request, request_filters: filters.CriterionFilterSchema = Query
 @api.get('/routes', response=List[schemas.ListRouteSchema])
 @pagination.paginate()
 def get_routes(request, request_filters: filters.RouteFilterSchema = Query(...)):
-    """
-    Получение перечня мест
-    :param request: запрос
-    :param request_filters: фильтры запроса
-    :return: перечень мест
-    """
+    """ Получение перечня мест """
     routes = models.Route.objects.filter(author=request.user).add_is_draft_field().all()
     routes = request_filters.filter(routes)
     return routes
@@ -77,145 +68,101 @@ def get_routes(request, request_filters: filters.RouteFilterSchema = Query(...))
 
 @api.get('/routes/{route_uuid}', response=schemas.DetailedRouteSchema)
 def get_route(request, route_uuid: uuid.UUID):
-    """
-    Получение маршрута
-    :param request: запрос
-    :param route_uuid: уникальный идентификатор маршрута
-    :return: маршрут
-    """
+    """ Получение маршрута """
     return _get_route(request, route_uuid, prefetch=('places', ))
 
 
 @api.post('/routes/', response=schemas.DetailedRouteSchema)
-def create_route(request, payload: schemas.WriteRouteSchema):
-    """
-    Создание маршрута
-    :param request: запрос
-    :param payload: тело запроса
-    :return: маршрут
-    """
-    # TODO: логика на полное заполнение маршрута целиком
-    route = models.Route.objects.create(**payload.dict(), author=request.user)
-    setattr(route, 'is_draft', True)
-    return route
+def create_route(request, payload: schemas.CreateRouteSchema):
+    """ Создание маршрута """
+    try:
+        return _operate_route(request, payload.dict())
+    except Exception as ex:
+        raise errors.HttpError(400, str(ex)) from ex
 
 
-# TODO: PUT / PATCH маршрута целиком
+@api.put('/routes/{route_uuid}/', response=schemas.DetailedRouteSchema)
+def update_route(request, route_uuid: uuid.UUID, payload: schemas.CreateRouteSchema):
+    """ Обновление маршрута """
+    try:
+        request_data = payload.dict()
+        for not_required_field_name in ('guide_description', 'criteria'):
+            if not_required_field_name not in request_data:
+                request_data[not_required_field_name] = None
+
+        return _operate_route(request, request_data, route_uuid)
+    except models.Route.DoesNotExist as ex:
+        raise errors.HttpError(404, 'Маршрут не найден') from ex
+    except Exception as ex:
+        raise errors.HttpError(400, str(ex)) from ex
 
 
-@api.delete('/routes/{route_uuid}/', response={204: None})
+@api.patch('/routes/{route_uuid}/', response=schemas.DetailedRouteSchema)
+def partial_update_route(request, route_uuid: uuid.UUID, payload: schemas.UpdateRouteSchema):
+    """ Частичное обновление маршрута """
+    try:
+        return _operate_route(request, payload.dict(exclude_unset=True), route_uuid)
+    except models.Route.DoesNotExist as ex:
+        raise errors.HttpError(404, 'Маршрут не найден') from ex
+    except Exception as ex:
+        raise errors.HttpError(400, str(ex)) from ex
+
+
+@api.delete('/routes/{route_uuid}/', response={204: None}, auth=AsyncAPIKeyAuth())
 async def remove_route(request, route_uuid: uuid.UUID):
-    """
-    Удаление маршрута
-    :param request: запрос
-    :param route_uuid: uuid маршрута
-    :return: None
-    """
-    count, _ = await models.Route.objects.filter(author=request.user, uuid=route_uuid).adelete()
+    """ Удаление маршрута """
+    await request.auth
+    delete_count, _ = await models.Route.objects.filter(author=request.user, uuid=route_uuid).adelete()
 
-    if not count:
+    if not delete_count:
         raise errors.HttpError(404, 'Маршрут не найден')
 
     return 204, None
 
 
-@api.post('/routes/{route_uuid}/places/', response=schemas.DetailedRouteSchema)
-def add_place_to_route(request, route_uuid: uuid.UUID, payload: schemas.PlaceToRouteSchema):
+@api.post('/routes/{route_uuid}/build/', auth=AsyncAPIKeyAuth(), response={204: None})
+async def build_route(request, route_uuid: uuid.UUID):
+    """ Запрос на строительство маршрута """
+    await request.auth
+
+    try:
+        route = await models.Route.objects.aget(author=request.user, uuid=route_uuid)
+    except models.Route.DoesNotExist as ex:
+        raise errors.HttpError(404, 'Маршрут не найден') from ex
+
+    request = {
+        'points_coordinates': await sync_to_async(models_utils.get_points_coordinates_from_route_places)(route),
+        **await sync_to_async(models_utils.get_criteria_from_route)(route)
+    }
+
+    await gateways.build_route(route_uuid, request)
+
+
+@api.get('/routes/{route_uuid}/guide/', response={200: str})
+def get_route_guide(request, route_uuid: uuid.UUID):
+    """ Запрос на получение гида """
+    route = _get_route(request, route_uuid, add_draft_field=False, prefetch=('places', ))
+
+    if guide_description := route.guide_description:
+        return guide_description
+
+    route_places = route.places.values('name', 'description')
+    return render(request, 'guide.html', context={
+        'route': route,
+        'route_places': list(route_places),
+    })
+
+
+def _operate_route(request, route_data: dict, *args):
     """
-    Добавление места в маршрут
+    Добавление / обновление маршрута
     :param request: запрос
-    :param route_uuid: uuid маршрута
     :param payload: тело запроса
+    :param args: аргументы обновления
     :return: маршрут
     """
-    route = _get_route(request, route_uuid)
-
-    try:
-        route = queries.add_place_to_route(route, payload.dict()['uuid'])
-    except models.Place.DoesNotExist as ex:
-        raise errors.HttpError(404, 'Место не найдено') from ex
-
-    return route
-
-
-@api.delete('/routes/{route_uuid}/places/{place_uuid}/', response={204: None})
-def remove_place_from_route(request, route_uuid: uuid.UUID, place_uuid: uuid.UUID):
-    """
-    Удаление места из маршрута
-    :param request: запрос
-    :param route_uuid: uuid маршрута
-    :param place_uuid: uuid места
-    :return: None
-    """
-    route = _get_route(request, route_uuid)
-
-    try:
-        queries.remove_place_from_route(route, place_uuid)
-    except models.Place.DoesNotExist as ex:
-        raise errors.HttpError(404, 'Место не найдено') from ex
-
-    return 204, None
-
-
-@api.post('/routes/{route_uuid}/criteria/', response=schemas.DetailedRouteSchema)
-def add_criterion_to_route(request, route_uuid: uuid.UUID, payload: schemas.CriterionToRouteSchema):
-    """
-    Добавление критерия в маршрут
-    :param request: запрос
-    :param route_uuid: uuid маршрута
-    :param payload: тело запроса
-    :return: маршрут
-    """
-    route = _get_route(request, route_uuid)
-
-    try:
-        queries.add_criterion_to_route(route, dict(payload))
-    except models.Criterion.DoesNotExist as ex:
-        raise errors.HttpError(404, 'Критерий не найден') from ex
-
-    route.refresh_from_db()
-    return route
-
-
-@api.patch('/routes/{route_uuid}/criteria/{criterion_internal_name}/', response=schemas.UpdateRouteCriterion)
-def update_route_criterion(request,
-                           route_uuid: uuid.UUID, criterion_internal_name: str, payload: schemas.UpdateRouteCriterion):
-    """
-    Обновление критерия в маршруте
-    :param request: запрос
-    :param route_uuid: uuid маршрута
-    :param criterion_internal_name: внутреннее наименование маршрута
-    :param payload: тело запроса
-    :return: маршрут
-    """
-    route = _get_route(request, route_uuid)
-
-    try:
-        queries.edit_route_criterion(route, {**payload.dict(), **{'internal_name': criterion_internal_name}})
-    except models.Criterion.DoesNotExist as ex:
-        raise errors.HttpError(404, 'Критерий не найден') from ex
-
-    route.refresh_from_db()
-    return route
-
-
-@api.delete('/routes/{route_uuid}/criteria/{criterion_internal_name}', response={204: None})
-def remove_criterion_from_route(request, route_uuid: uuid.UUID, criterion_internal_name: str):
-    """
-    Удаление критерия из маршрута
-    :param request: запрос
-    :param route_uuid: uuid маршрута
-    :param criterion_internal_name: внутреннее наименование критерия
-    :return: None
-    """
-    route = _get_route(request, route_uuid)
-
-    try:
-        queries.remove_criterion_from_route(route, criterion_internal_name)
-    except models.Criterion.DoesNotExist as ex:
-        raise errors.HttpError(404, 'Критерий не найден') from ex
-
-    return 204, None
+    route_data['author'] = request.user
+    return models_utils.create_or_update_route(route_data, *args)
 
 
 def _get_route(request, route_uuid: uuid.UUID, add_draft_field: Optional[bool] = True,

@@ -1,7 +1,4 @@
 from django.contrib import admin
-from django.db.models import JSONField
-
-from django_json_widget.widgets import JSONEditorWidget
 
 from route_settings_builder import models
 
@@ -17,34 +14,36 @@ class CriterionAdmin(admin.ModelAdmin):
 
 class PlaceCriterionInline(admin.TabularInline):
     """ Inline-панель для страницы мест. Отображает блок критериев для места """
-    autocomplete_fields = ('criterion', )
-
     model = models.PlaceCriterion
-    extra = 1
+
+    autocomplete_fields = ('criterion', )
+    extra = 0
 
 
 @admin.register(models.Place)
 class PlaceAdmin(admin.ModelAdmin):
     """ Администраторская страница для мест """
     search_fields = ('uuid', 'name', )
-    list_display = ('name', 'longitude', 'latitude', 'updated_at', 'created_at', )
+    list_display = ('name', 'latitude', 'longitude', 'updated_at', 'created_at', )
     ordering = ('-updated_at', )
-    readonly_fields = ('uuid', )
 
     inlines = (PlaceCriterionInline, )
 
 
+class RoutePlaceInline(admin.StackedInline):
+    """ Inline-панель для страницы маршрута. Отображает блок мест для маршрута """
+    model = models.RoutePlace
+
+    autocomplete_fields = ('place',)
+    extra = 0
+
+
 class RouteCriterionInline(admin.TabularInline):
     """ Inline-панель для страницы маршрута. Отображает блок критериев для маршрута """
-    autocomplete_fields = ('criterion', )
-
     model = models.RouteCriterion
-    extra = 1
 
-
-class GuideInline(admin.TabularInline):
-    """ Inline-панель для страницы маршрута. Отображает блок путеводителя для маршрута """
-    model = models.Guide
+    autocomplete_fields = ('criterion', )
+    extra = 0
 
 
 @admin.register(models.Route)
@@ -55,9 +54,5 @@ class RouteAdmin(admin.ModelAdmin):
     ordering = ('-updated_at', )
     readonly_fields = ('uuid', )
 
-    autocomplete_fields = ('places', 'author', )
-    inlines = (GuideInline, RouteCriterionInline, )
-
-    formfield_overrides = {
-        JSONField: {'widget': JSONEditorWidget},
-    }
+    autocomplete_fields = ('author', )
+    inlines = (RoutePlaceInline, RouteCriterionInline, )

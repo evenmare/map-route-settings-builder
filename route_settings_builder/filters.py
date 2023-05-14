@@ -14,6 +14,7 @@ class PlaceFilterSchema(FilterSchema):
     latitude__gte: Optional[float]
     latitude__lte: Optional[float]
     criteria: Optional[List[str]]
+    id__in: Optional[List[int]]
 
     @staticmethod
     def filter_criteria(value: Optional[List[str]]) -> Q:
@@ -44,6 +45,7 @@ class RouteFilterSchema(FilterSchema):
     name: Optional[str] = Field(q='name__icontains')
     is_draft: Optional[bool] = None
     criteria: Optional[List[str]]
+    id__in: Optional[List[int]]
 
     @staticmethod
     def filter_criteria(value: Optional[List[str]]) -> Q:
